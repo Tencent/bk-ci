@@ -139,12 +139,9 @@ open class DefaultModelCheckPlugin constructor(
                 }
             }
 
-            if (s.stageControlOption?.manualTrigger == true && s.stageControlOption?.triggerUsers?.isEmpty() == true) {
-                throw ErrorCodeException(
-                    defaultMessage = "手动触发的Stage没有未配置可执行人",
-                    errorCode = ProcessMessageCode.ERROR_PIPELINE_STAGE_NO_TRIGGER_USER
-                )
-            }
+            // #4531 检查stage审核组配置是否符合要求
+            if (s.stageControlOption?.manualTrigger == true) checkStageReviewers(s)
+
             val atomVersions = mutableSetOf<StoreVersion>()
             val atomInputParamList = mutableListOf<StoreParam>()
             checkElements(
@@ -164,6 +161,22 @@ open class DefaultModelCheckPlugin constructor(
                 )
             }
             DependOnUtils.checkRepeatedJobId(stage)
+        }
+    }
+
+    private fun checkStageReviewers(stage: Stage) {
+        stage.stageControlOption?.refreshReviewOption()
+        if (stage.stageControlOption?.reviewGroups?.isNullOrEmpty() == true) {
+            throw ErrorCodeException(
+                defaultMessage = "手动触发的Stage未配置审核组",
+                errorCode = ProcessMessageCode.ERROR_PIPELINE_STAGE_NO_REVIEW_GROUP
+            )
+        }
+        stage.stageControlOption?.reviewGroups?.forEach { group ->
+            if (group.reviewers.isNullOrEmpty()) throw ErrorCodeException(
+                errorCode = ProcessMessageCode.ERROR_PIPELINE_STAGE_REVIEW_GROUP_NO_USER,
+                params = arrayOf(stage.name!!, group.name)
+            )
         }
     }
 

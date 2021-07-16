@@ -30,6 +30,8 @@ package com.tencent.devops.process.engine.service
 import com.tencent.devops.common.event.dispatcher.pipeline.PipelineEventDispatcher
 import com.tencent.devops.common.event.enums.ActionType
 import com.tencent.devops.common.pipeline.enums.BuildStatus
+import com.tencent.devops.common.pipeline.enums.ManualReviewAction
+import com.tencent.devops.common.pipeline.pojo.StageReviewRequest
 import com.tencent.devops.common.websocket.enum.RefreshType
 import com.tencent.devops.process.engine.common.BS_MANUAL_START_STAGE
 import com.tencent.devops.process.engine.common.BS_STAGE_CANCELED_END_SOURCE
@@ -160,9 +162,29 @@ class PipelineStageService @Autowired constructor(
         }
     }
 
-    fun startStage(userId: String, buildStage: PipelineBuildStage) {
-        buildStage.controlOption!!.stageControlOption.triggered = true
+    fun startStage(
+        userId: String,
+        buildStage: PipelineBuildStage,
+        reviewRequest: StageReviewRequest?
+    ): Boolean {
         with(buildStage) {
+            val option = this.controlOption!!.stageControlOption
+            val success = option.reviewGroup(
+                userId = userId,
+                groupId = reviewRequest?.id,
+                action = ManualReviewAction.PROCESS,
+                params = reviewRequest?.reviewParams,
+                suggest = reviewRequest?.suggest
+            )
+            if (!success) return false
+            stageBuildDetailService.stageReview(
+                buildId = buildId,
+                stageId = stageId,
+                controlOption = buildStage.controlOption!!
+            )
+            // #4531 如果没有其他需要审核的审核组则可以启动stage，否则直接返回
+            if (option.groupToReview() != null) return true
+
             val allStageStatus = stageBuildDetailService.stageStart(
                 buildId = buildId,
                 stageId = stageId,
@@ -201,12 +223,25 @@ class PipelineStageService @Autowired constructor(
                 )
                 // #3400 点Stage启动时处于DETAIL界面，以操作人视角，没有刷历史列表的必要
             )
+            return true
         }
     }
 
-    fun cancelStage(userId: String, buildStage: PipelineBuildStage) {
-
-        stageBuildDetailService.stageCancel(buildId = buildStage.buildId, stageId = buildStage.stageId)
+    fun cancelStage(
+        userId: String,
+        buildStage: PipelineBuildStage,
+        groupId: String?
+    ): Boolean {
+        buildStage.controlOption!!.stageControlOption.reviewGroup(
+            userId = userId,
+            groupId = groupId,
+            action = ManualReviewAction.ABORT
+        )
+        stageBuildDetailService.stageCancel(
+            buildId = buildStage.buildId,
+            stageId = buildStage.stageId,
+            controlOption = buildStage.controlOption!!
+        )
 
         dslContext.transaction { configuration ->
             val context = DSL.using(configuration)
@@ -243,6 +278,7 @@ class PipelineStageService @Autowired constructor(
             )
             // #3400 FinishEvent会刷新HISTORY列表的Stage状态
         )
+        return true
     }
 
     fun getLastStage(buildId: String): PipelineBuildStage? {

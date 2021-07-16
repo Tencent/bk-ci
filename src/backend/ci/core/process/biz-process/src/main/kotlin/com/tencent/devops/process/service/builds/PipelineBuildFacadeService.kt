@@ -771,20 +771,32 @@ class PipelineBuildFacadeService(
                 defaultMessage = "构建Stage${stageId}不存在",
                 params = arrayOf(stageId)
             )
-        if (buildStage.controlOption?.stageControlOption?.triggerUsers?.contains(userId) != true) {
-            throw ErrorCodeException(
-                statusCode = Response.Status.FORBIDDEN.statusCode,
-                errorCode = ProcessMessageCode.USER_NEED_PIPELINE_X_PERMISSION,
-                defaultMessage = "用户($userId)不在Stage($stageId)可执行名单",
-                params = arrayOf(buildId)
-            )
-        }
+
         if (buildStage.status.name != BuildStatus.PAUSE.name) throw ErrorCodeException(
             statusCode = Response.Status.NOT_FOUND.statusCode,
             errorCode = ProcessMessageCode.ERROR_STAGE_IS_NOT_PAUSED,
             defaultMessage = "Stage($stageId)未处于暂停状态",
-            params = arrayOf(buildId)
+            params = arrayOf(stageId)
         )
+        val option = buildStage.controlOption?.stageControlOption
+        val group = option?.getReviewGroupById(reviewRequest?.id)
+        if (group?.id != option?.groupToReview()?.id) {
+            throw ErrorCodeException(
+                statusCode = Response.Status.FORBIDDEN.statusCode,
+                errorCode = ProcessMessageCode.ERROR_PIPELINE_STAGE_REVIEW_GROUP_NOT_FOUND,
+                defaultMessage = "(${reviewRequest?.id ?: "default"})非Stage($stageId)当前待审核组",
+                params = arrayOf(stageId, reviewRequest?.id ?: "default")
+            )
+        }
+
+        if (option?.reviewerContains(userId) != true) {
+            throw ErrorCodeException(
+                statusCode = Response.Status.FORBIDDEN.statusCode,
+                errorCode = ProcessMessageCode.USER_NEED_PIPELINE_X_PERMISSION,
+                defaultMessage = "用户($userId)不在Stage($stageId)当前审核组可执行名单",
+                params = arrayOf(stageId)
+            )
+        }
 
         val runLock = PipelineBuildRunLock(redisOperation, pipelineId)
         try {
@@ -802,12 +814,26 @@ class PipelineBuildFacadeService(
                     defaultMessage = "Stage启动失败![${interceptResult.message}]"
                 )
             }
-            if (isCancel) {
-                pipelineStageService.cancelStage(userId = userId, buildStage = buildStage)
+            val success = if (isCancel) {
+                pipelineStageService.cancelStage(
+                    userId = userId,
+                    buildStage = buildStage,
+                    groupId = reviewRequest?.id
+                )
             } else {
                 buildStage.controlOption!!.stageControlOption.reviewParams = reviewRequest?.reviewParams
-                pipelineStageService.startStage(userId = userId, buildStage = buildStage)
+                pipelineStageService.startStage(
+                    userId = userId,
+                    buildStage = buildStage,
+                    reviewRequest = reviewRequest
+                )
             }
+            if (!success) throw ErrorCodeException(
+                statusCode = Response.Status.BAD_REQUEST.statusCode,
+                errorCode = ProcessMessageCode.ERROR_PIPLEINE_INPUT,
+                defaultMessage = "审核Stage($stageId)数据异常",
+                params = arrayOf(stageId)
+            )
         } finally {
             runLock.unlock()
         }

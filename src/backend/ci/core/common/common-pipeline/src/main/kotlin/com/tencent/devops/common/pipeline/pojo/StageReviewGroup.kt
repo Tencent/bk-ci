@@ -31,12 +31,20 @@ import com.tencent.devops.common.pipeline.pojo.element.atom.ManualReviewParam
 import io.swagger.annotations.ApiModel
 import io.swagger.annotations.ApiModelProperty
 
-@ApiModel("人工审核-自定义参数")
-data class StageReviewRequest(
-    @ApiModelProperty("reviewParams", required = true)
-    val reviewParams: List<ManualReviewParam>,
-    @ApiModelProperty("审核组ID", required = false)
-    val id: String?,
+@ApiModel("Stage审核组信息")
+data class StageReviewGroup(
+    @ApiModelProperty("审核组ID(后台生成)", required = false)
+    var id: String? = null,
+    @ApiModelProperty("审核组名称", required = true)
+    val name: String = "default",
+    @ApiModelProperty("审核人员", required = true)
+    var reviewers: List<String> = listOf(),
+    @ApiModelProperty("审核结果（枚举）", required = false)
+    var status: String? = null,
+    @ApiModelProperty("审核操作人", required = false)
+    var operator: String? = null,
     @ApiModelProperty("审核建议", required = false)
-    var suggest: String? = ""
+    var suggest: String? = "",
+    @ApiModelProperty("审核传入变量", required = false)
+    var params: MutableList<ManualReviewParam>? = mutableListOf()
 )
